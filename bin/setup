@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+set -vx
+
+# Install Ruby dependencies
+bundle install
+
+# Check if yarn is installed
+if ! command -v yarn &> /dev/null; then
+  echo "yarn is required but not installed. Please install yarn first."
+  echo "Visit https://yarnpkg.com/getting-started/install for installation instructions."
+  exit 1
+fi
+
+# Install Tailwind CSS language server
+echo "Installing Tailwind CSS language server..."
+yarn install
+
+echo "Setup complete!"

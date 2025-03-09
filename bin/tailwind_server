@@ -1,0 +1,42 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "tailwind_sorter/server_manager"
+
+# This script starts the Tailwind CSS language server as a standalone process
+
+$stdout.sync = true # Ensure output is immediately flushed
+port = ARGV[0]&.to_i || 19837
+
+begin
+  puts "Starting Tailwind CSS language server on port #{port}..."
+  server = TailwindSorter::ServerManager.new(port: port)
+
+  # Print the path being used
+  server_path = server.send(:instance_variable_get, :@server_path)
+  puts "Using server at: #{server_path}"
+
+  server.start
+  puts "Server running with PID: #{server.pid}"
+  puts "Press Ctrl+C to stop the server"
+
+  # Keep the script running until interrupted
+  trap('INT') do
+    puts "\nStopping server..."
+    server.stop
+    exit
+  end
+
+  # Wait indefinitely
+  loop do
+    sleep 1
+    unless server.running?
+      puts "Warning: Server stopped unexpectedly. Restarting..."
+      server.start
+    end
+  end
+rescue TailwindSorter::Error => e
+  puts "Error: #{e.message}"
+  exit 1
+end

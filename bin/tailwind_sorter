@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "tailwind_sorter"
+require 'optparse'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: tailwind_sorter [options] <tailwind-classes>"
+
+  opts.on("--debug", "Enable debug mode") do |v|
+    options[:debug] = v
+  end
+end.parse!
+
+if ARGV.empty?
+  puts "Usage: tailwind_sorter [options] <tailwind-classes>"
+  exit 1
+end
+
+# Join all arguments to handle classes with spaces
+classes = ARGV.join(' ')
+
+begin
+  # Set debug mode if requested
+  TailwindSorter.debug = options[:debug]
+
+  sorted = TailwindSorter.sort(classes)
+  puts sorted
+
+  # Don't stop the server to avoid startup costs for subsequent runs
+rescue TailwindSorter::Error => e
+  puts "Error: #{e.message}"
+  exit 1
+end
