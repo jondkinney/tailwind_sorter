@@ -21,10 +21,6 @@ RSpec.describe TailwindSorter::DirectClient do
   end
 
   def create_test_files(config_path:, css_path: nil)
-    # Remove any existing test files first
-    cleanup_test_files(config_path, css_path)
-
-    # Create new files
     FileUtils.mkdir_p(File.dirname(config_path))
     File.write(config_path, sample_config)
 
@@ -34,37 +30,10 @@ RSpec.describe TailwindSorter::DirectClient do
     end
   end
 
-  def cleanup_test_files(*paths)
-    paths.each do |path|
-      next unless path
-      begin
-        if File.directory?(path)
-          FileUtils.rm_rf(path)
-        else
-          FileUtils.rm_f(path)
-          # Also clean up parent directories if they're empty
-          dir = File.dirname(path)
-          while dir != "." && dir != "/" && Dir.exist?(dir)
-            begin
-              Dir.rmdir(dir)
-              dir = File.dirname(dir)
-            rescue Errno::ENOTEMPTY, Errno::ENOENT, Errno::EACCES
-              break
-            end
-          end
-        end
-      rescue Errno::ENOENT, Errno::EACCES => e
-        warn "Warning: Could not remove #{path}: #{e.message}"
-      end
-    end
-  end
-
   describe "config file detection" do
     let(:root_dir) { Dir.pwd }
-
-    after(:each) do
-      # Clean up any test files we created
-      cleanup_test_files(
+    let(:test_paths) do
+      [
         File.join(root_dir, "tailwind.config.js"),
         File.join(root_dir, "tailwind.config.cjs"),
         File.join(root_dir, "tailwind.config.mjs"),
@@ -74,23 +43,11 @@ RSpec.describe TailwindSorter::DirectClient do
         File.join(root_dir, "src"),
         File.join(root_dir, "app"),
         File.join(root_dir, "assets")
-      )
+      ]
     end
 
-    before(:each) do
-      # Ensure a clean state before each test
-      cleanup_test_files(
-        File.join(root_dir, "tailwind.config.js"),
-        File.join(root_dir, "tailwind.config.cjs"),
-        File.join(root_dir, "tailwind.config.mjs"),
-        File.join(root_dir, "tailwind.config.ts"),
-        File.join(root_dir, "config"),
-        File.join(root_dir, "styles.css"),
-        File.join(root_dir, "src"),
-        File.join(root_dir, "app"),
-        File.join(root_dir, "assets")
-      )
-    end
+    before(:each) { cleanup_test_files(*test_paths) }
+    after(:each) { cleanup_test_files(*test_paths) }
 
     it "finds config in root directory" do
       config_path = File.join(root_dir, "tailwind.config.js")

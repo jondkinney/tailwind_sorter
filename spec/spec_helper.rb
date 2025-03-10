@@ -5,6 +5,7 @@ ENV['RAILS_ENV'] = 'test'
 ENV['RACK_ENV'] = 'test'
 
 require 'tailwind_sorter'
+require_relative 'support/file_helpers'
 
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
@@ -16,6 +17,9 @@ RSpec.configure do |config|
   config.expect_with :rspec do |c|
     c.syntax = :expect
   end
+
+  # Include the FileHelpers module in all test files
+  config.include FileHelpers
 
   # Run tests in random order
   config.order = :random
