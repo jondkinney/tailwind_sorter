@@ -429,18 +429,52 @@ module TailwindSorter
     def read_message
       # Read headers
       headers = {}
-      while line = @stdout.gets("\r\n")
-        line = line.strip
-        break if line.empty?
+      begin
+        while line = Timeout.timeout(5) { @stdout.gets("\r\n") }
+          line = line.strip
+          break if line.empty?
 
-        key, value = line.split(': ', 2)
-        headers[key] = value
+          key, value = line.split(': ', 2)
+          headers[key] = value
+        end
+
+        if !headers["Content-Length"]
+          @logger.error("No Content-Length header received from server")
+          raise Error, "Invalid response from language server: missing Content-Length header"
+        end
+
+        content_length = headers["Content-Length"].to_i
+        
+        # Read exactly content_length bytes to avoid waiting indefinitely
+        content = ""
+        bytes_read = 0
+        while bytes_read < content_length
+          chunk = Timeout.timeout(5) { @stdout.read(content_length - bytes_read) }
+          if chunk.nil? || chunk.empty?
+            # This indicates the server closed the connection or sent incomplete data
+            @logger.error("Server sent incomplete response (got #{bytes_read} of #{content_length} bytes)")
+            raise Error, "Server sent incomplete response. This might be caused by an issue with the Tailwind language server."
+          end
+          content += chunk
+          bytes_read += chunk.bytesize
+        end
+        
+        content.force_encoding('UTF-8')
+        
+        begin
+          return JSON.parse(content)
+        rescue JSON::ParserError => e
+          @logger.error("JSON parse error: #{e.message}")
+          @logger.error("Content received (#{content.bytesize} bytes): #{content.inspect}")
+          raise Error, "Failed to parse server response: #{e.message}. Try restarting the Tailwind language server."
+        end
+      rescue Timeout::Error
+        @logger.error("Timeout while reading from server")
+        raise Error, "Timeout while reading from Tailwind language server. The server might be busy or unresponsive."
+      rescue IOError, Errno::EPIPE => e
+        @logger.error("IO error: #{e.message}")
+        raise Error, "Connection to Tailwind language server lost: #{e.message}. Try restarting the application."
       end
-
-      content_length = headers["Content-Length"].to_i
-      content = @stdout.read(content_length).force_encoding('UTF-8')
-
-      JSON.parse(content)
     end
 
     def handle_pending_messages(timeout = 0.5)
