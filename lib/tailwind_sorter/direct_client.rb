@@ -88,8 +88,9 @@ module TailwindSorter
 
       @logger.debug("Starting server...")
 
-      # Create temporary directory if we don't have one
-      @temp_dir ||= Dir.mktmpdir("tailwind_sorter")
+      # Create temporary directory if we don't have one, using unique name
+      @temp_dir ||= Dir.mktmpdir(generate_temp_dir_name)
+      @logger.debug("Created temp directory at: #{@temp_dir}")
 
       # Always ensure our virtual HTML file exists
       html_path = File.join(@temp_dir, "virtual.html")
@@ -514,6 +515,30 @@ module TailwindSorter
         content: nil,
         path: nil
       }
+    end
+
+    def generate_temp_dir_name
+      # Create a unique hash based on project path and config content
+      components = []
+
+      if @project_root
+        # Use last two parts of the project path to help identify in temp dir
+        path_parts = @project_root.split(File::SEPARATOR).last(2)
+        components << path_parts.join('-')
+      end
+
+      if @config_path && File.exist?(@config_path)
+        # Add hash of config content for uniqueness
+        config_content = File.read(@config_path)
+        config_hash = Digest::MD5.hexdigest(config_content)[0..7]
+        components << config_hash
+      end
+
+      # Add a timestamp for complete uniqueness
+      components << Time.now.to_i.to_s
+
+      # Join all components
+      "tailwind_sorter-#{components.join('-')}"
     end
   end
 end
