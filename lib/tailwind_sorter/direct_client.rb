@@ -289,6 +289,9 @@ module TailwindSorter
 
       result = response.dig("result", "classLists", 0) || classes
 
+      # Normalize spaces: trim whitespace and ensure single spaces between classes
+      result = result.strip.gsub(/\s+/, ' ')
+
       # Cache the result
       @sort_cache[cache_key] = result
       @sort_cache_time[cache_key] = Time.now
