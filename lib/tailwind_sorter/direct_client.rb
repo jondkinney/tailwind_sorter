@@ -4,6 +4,7 @@ require 'timeout'
 require 'tmpdir'
 require 'fileutils'
 require 'logger'
+require 'digest'
 
 module TailwindSorter
   # A client that communicates with the Tailwind CSS language server directly via stdin/stdout
@@ -55,7 +56,19 @@ module TailwindSorter
       @temp_dir = nil
       @logger = Logger.new($stderr)
       @logger.level = @debug ? Logger::DEBUG : Logger::WARN
-      
+
+      # Cache for config file state
+      @config_cache = {
+        mtime: nil,
+        content: nil,
+        path: nil
+      }
+
+      # Cache for sorted class strings
+      @sort_cache = {}
+      @sort_cache_time = {}
+      @sort_cache_expires = options.fetch(:cache_expires, 5) # 5 second default
+
       # First find a project by detecting config files
       @project_root = find_project_root
       if @project_root
@@ -63,7 +76,7 @@ module TailwindSorter
         @config_path = find_tailwind_config
         @css_path = find_css_file if @config_path
       end
-      
+
       @logger.debug("Initialized with:")
       @logger.debug("  Project Root: #{@project_root}")
       @logger.debug("  Config Path: #{@config_path}")
@@ -74,115 +87,137 @@ module TailwindSorter
       return if running?
 
       @logger.debug("Starting server...")
-      
-      # Create temporary directory for LSP workspace
-      @temp_dir = Dir.mktmpdir("tailwind_sorter")
-      
-      # Always create our virtual workspace in the temp directory
+
+      # Create temporary directory if we don't have one
+      @temp_dir ||= Dir.mktmpdir("tailwind_sorter")
+
+      # Always ensure our virtual HTML file exists
       html_path = File.join(@temp_dir, "virtual.html")
-      File.write(html_path, "<div><!-- virtual document for processing tailwind classes --></div>")
+      File.write(html_path, "<div><!-- virtual document for processing tailwind classes --></div>") unless File.exist?(html_path)
 
       if @project_root
-        # Copy the project's config to our temp dir so LSP has a consistent workspace
-        temp_config_path = File.join(@temp_dir, File.basename(@config_path))
-        FileUtils.cp(@config_path, temp_config_path)
-        
-        # If we have a CSS file, copy it too
-        if @css_path
-          temp_css_path = File.join(@temp_dir, File.basename(@css_path))
-          FileUtils.cp(@css_path, temp_css_path)
-          @css_path = temp_css_path
+        # Check if config has changed
+        current_mtime = File.mtime(@config_path)
+        if @config_cache[:path] != @config_path || @config_cache[:mtime] != current_mtime
+          @logger.debug("Config file changed or new, copying to workspace")
+
+          # Copy the project's config to our temp dir
+          temp_config_path = File.join(@temp_dir, File.basename(@config_path))
+          FileUtils.cp(@config_path, temp_config_path)
+
+          # Update cache
+          @config_cache = {
+            mtime: current_mtime,
+            content: File.read(@config_path),
+            path: @config_path
+          }
+
+          # If we have a CSS file, copy it too (only needs to happen once)
+          if @css_path && !File.exist?(File.join(@temp_dir, File.basename(@css_path)))
+            temp_css_path = File.join(@temp_dir, File.basename(@css_path))
+            FileUtils.cp(@css_path, temp_css_path)
+            @css_path = temp_css_path
+          end
+
+          # Use the temp copy of the config
+          @config_path = temp_config_path
+
+          # Clear sort cache since config changed
+          @sort_cache.clear
+          @sort_cache_time.clear
         end
-        
-        # Use the temp copy of the config
-        @config_path = temp_config_path
       else
-        # No project found, create temporary config
-        @config_path = File.join(@temp_dir, "tailwind.config.js")
-        File.write(@config_path, DEFAULT_CONFIG)
-        @css_path = File.join(@temp_dir, "styles.css")
-        File.write(@css_path, DEFAULT_CSS)
+        # No project found, create temporary config if needed
+        unless File.exist?(File.join(@temp_dir, "tailwind.config.js"))
+          @config_path = File.join(@temp_dir, "tailwind.config.js")
+          File.write(@config_path, DEFAULT_CONFIG)
+          @css_path = File.join(@temp_dir, "styles.css")
+          File.write(@css_path, DEFAULT_CSS)
+        end
       end
 
-      # Start the language server process
-      @stdin, @stdout, @stderr, @wait_thread = Open3.popen3("#{@server_path} --stdio")
+      # Only start the server if it's not running
+      unless running?
+        # Start the language server process
+        @stdin, @stdout, @stderr, @wait_thread = Open3.popen3("#{@server_path} --stdio")
 
-      # Initialize with our temp directory as root for a consistent workspace
-      root_uri = "file://#{@temp_dir}"
-      
-      request_sync('initialize', {
-        processId: Process.pid,
-        clientInfo: {
-          name: 'tailwind_sorter',
-          version: '0.1.0'
-        },
-        rootUri: root_uri,
-        workspaceFolders: [
-          {
-            uri: root_uri,
-            name: "tailwind_sorter"
-          }
-        ],
-        capabilities: {
-          textDocument: {
-            synchronization: {
-              didOpen: true,
-              didChange: true
-            }
+        # Initialize with our temp directory as root for a consistent workspace
+        root_uri = "file://#{@temp_dir}"
+
+        request_sync('initialize', {
+          processId: Process.pid,
+          clientInfo: {
+            name: 'tailwind_sorter',
+            version: '0.1.0'
           },
-          workspace: {
-            configuration: true
-          }
-        }
-      })
-
-      # Send initialized notification
-      send_notification('initialized', {})
-
-      # Configure the Tailwind workspace
-      send_notification('workspace/didChangeConfiguration', {
-        settings: {
-          tailwindCSS: {
-            experimental: { classRegex: [] },
-            validate: true
-          }
-        }
-      })
-
-      # Open the config file first - this is crucial for project detection
-      send_notification('textDocument/didOpen', {
-        textDocument: {
-          uri: "file://#{@config_path}",
-          languageId: "javascript",
-          version: 1,
-          text: File.read(@config_path)
-        }
-      })
-
-      # Open CSS file if we have one
-      if @css_path
-        send_notification('textDocument/didOpen', {
-          textDocument: {
-            uri: "file://#{@css_path}",
-            languageId: "css",
-            version: 1,
-            text: File.read(@css_path)
+          rootUri: root_uri,
+          workspaceFolders: [
+            {
+              uri: root_uri,
+              name: "tailwind_sorter"
+            }
+          ],
+          capabilities: {
+            textDocument: {
+              synchronization: {
+                didOpen: true,
+                didChange: true
+              }
+            },
+            workspace: {
+              configuration: true
+            }
           }
         })
+
+        # Send initialized notification
+        send_notification('initialized', {})
+
+        # Configure the Tailwind workspace
+        send_notification('workspace/didChangeConfiguration', {
+          settings: {
+            tailwindCSS: {
+              experimental: { classRegex: [] },
+              validate: true
+            }
+          }
+        })
+
+        # Open the config file first - this is crucial for project detection
+        send_notification('textDocument/didOpen', {
+          textDocument: {
+            uri: "file://#{@config_path}",
+            languageId: "javascript",
+            version: 1,
+            text: File.read(@config_path)
+          }
+        })
+
+        # Open CSS file if we have one
+        if @css_path
+          send_notification('textDocument/didOpen', {
+            textDocument: {
+              uri: "file://#{@css_path}",
+              languageId: "css",
+              version: 1,
+              text: File.read(@css_path)
+            }
+          })
+        end
+
+        # Open our virtual HTML document
+        send_notification('textDocument/didOpen', {
+          textDocument: {
+            uri: "file://#{html_path}",
+            languageId: "html",
+            version: 1,
+            text: File.read(html_path)
+          }
+        })
+
+        # Handle any initial configuration requests
+        handle_pending_messages
       end
-
-      # Open our virtual HTML document
-      send_notification('textDocument/didOpen', {
-        textDocument: {
-          uri: "file://#{html_path}",
-          languageId: "html",
-          version: 1,
-          text: File.read(html_path)
-        }
-      })
-
-      # Handle any initial configuration requests
-      handle_pending_messages
     end
 
     def stop
@@ -203,16 +238,24 @@ module TailwindSorter
       @wait_thread&.kill
       @stdin = @stdout = @stderr = @wait_thread = nil
 
-      # Clean up temp directory
-      FileUtils.remove_entry(@temp_dir) if @temp_dir
-      @temp_dir = nil
-    end
-
-    def running?
-      !@wait_thread.nil? && @wait_thread.alive?
+      # Don't clean up temp directory anymore - we'll reuse it
     end
 
     def sort_classes(classes)
+      # Check cache first
+      cache_key = Digest::MD5.hexdigest(classes)
+      if @sort_cache.key?(cache_key)
+        cache_time = @sort_cache_time[cache_key]
+        if Time.now - cache_time < @sort_cache_expires
+          @logger.debug("Cache hit for classes: #{classes}")
+          return @sort_cache[cache_key]
+        else
+          # Cache expired
+          @sort_cache.delete(cache_key)
+          @sort_cache_time.delete(cache_key)
+        end
+      end
+
       start unless running?
 
       # Get path to our virtual HTML document
@@ -245,7 +288,12 @@ module TailwindSorter
       end
 
       result = response.dig("result", "classLists", 0) || classes
-      result = "error-sorting #{result}" if @debug
+
+      # Cache the result
+      @sort_cache[cache_key] = result
+      @sort_cache_time[cache_key] = Time.now
+
+      result = "debug-sorting #{result}" if @debug
       result
     end
 
@@ -264,12 +312,19 @@ module TailwindSorter
       result.nil? ? "No project found" : result
     end
 
+    def running?
+      @stdin && !@stdin.closed? &&
+      @stdout && !@stdout.closed? &&
+      @stderr && !@stderr.closed? &&
+      @wait_thread && @wait_thread.alive?
+    end
+
     private
 
     def find_project_root
       # Start from current directory and work up
       current_dir = Dir.pwd
-      
+
       while current_dir != '/'
         TAILWIND_CONFIG_PATTERNS.each do |pattern|
           path = File.join(current_dir, pattern)
@@ -278,7 +333,7 @@ module TailwindSorter
             return current_dir
           end
         end
-        
+
         # Move up one directory
         current_dir = File.dirname(current_dir)
       end
@@ -437,6 +492,25 @@ module TailwindSorter
       raise Error, "Tailwind CSS language server not found. Please install it with: bin/setup" unless path
 
       path
+    end
+
+    # only being called in one test right now.
+    def cleanup
+      # Clean up temp directory when explicitly requested
+      if @temp_dir && Dir.exist?(@temp_dir)
+        stop if running?
+        FileUtils.remove_entry(@temp_dir)
+        @temp_dir = nil
+      end
+
+      # Clear caches
+      @sort_cache.clear
+      @sort_cache_time.clear
+      @config_cache = {
+        mtime: nil,
+        content: nil,
+        path: nil
+      }
     end
   end
 end

@@ -150,9 +150,13 @@ RSpec.describe TailwindSorter::DirectClient do
       sorted = client.sort_classes(test_classes)
       expect(sorted).to eq("mt-2 flex p-4")
 
-      # Clean up
+      # Verify server stops but keeps temp dir for reuse
       client.stop
-      expect(Dir.exist?(temp_dir)).to be false
+      expect(Dir.exist?(temp_dir)).to be true
+      expect(client.instance_variable_get(:@stdin)).to be_nil
+
+      # Cleanup at end of test
+      client.cleanup if client.respond_to?(:cleanup)
     end
 
     it "finds CSS file in various locations" do
