@@ -6,15 +6,85 @@ set -vx
 # Install Ruby dependencies
 bundle install
 
-# Check if yarn is installed
-if ! command -v yarn &> /dev/null; then
-  echo "yarn is required but not installed. Please install yarn first."
-  echo "Visit https://yarnpkg.com/getting-started/install for installation instructions."
+# Check if npm or yarn is installed
+if command -v yarn &> /dev/null; then
+  PACKAGE_MANAGER="yarn"
+elif command -v npm &> /dev/null; then
+  PACKAGE_MANAGER="npm"
+else
+  echo "Neither yarn nor npm is installed. Please install one of these package managers first."
+  echo "Visit https://yarnpkg.com or https://nodejs.org for installation instructions."
   exit 1
 fi
 
+echo "Using $PACKAGE_MANAGER for JavaScript dependencies"
+
 # Install Tailwind CSS language server
 echo "Installing Tailwind CSS language server..."
-yarn install
+if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+  yarn install
+  # Make sure the executable has proper permissions
+  if [ -f "node_modules/.bin/tailwindcss-language-server" ]; then
+    chmod +x node_modules/.bin/tailwindcss-language-server
+  fi
+  # Verify installation
+  if [ ! -f "node_modules/.bin/tailwindcss-language-server" ]; then
+    echo "Warning: tailwindcss-language-server not found after installation"
+    echo "Installing it explicitly..."
+    yarn add @tailwindcss/language-server@^0.14.8 tailwindcss
+  fi
+else
+  npm install
+  # Make sure the executable has proper permissions
+  if [ -f "node_modules/.bin/tailwindcss-language-server" ]; then
+    chmod +x node_modules/.bin/tailwindcss-language-server
+  fi
+  # Verify installation
+  if [ ! -f "node_modules/.bin/tailwindcss-language-server" ]; then
+    echo "Warning: tailwindcss-language-server not found after installation"
+    echo "Installing it explicitly..."
+    npm install @tailwindcss/language-server@^0.14.8 tailwindcss
+  fi
+fi
+
+# Verify the installation was successful
+if [ -f "node_modules/.bin/tailwindcss-language-server" ]; then
+  echo "Tailwind CSS language server successfully installed"
+  # Check the version
+  VERSION=$(node_modules/.bin/tailwindcss-language-server --version 2>/dev/null || echo "unknown")
+  echo "Installed version: $VERSION"
+
+  # Try to parse version and verify it's at least 0.14.8
+  if [[ "$VERSION" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    MAJOR="${BASH_REMATCH[1]}"
+    MINOR="${BASH_REMATCH[2]}"
+    PATCH="${BASH_REMATCH[3]}"
+
+    if [ "$MAJOR" -lt 0 ] ||
+       ([ "$MAJOR" -eq 0 ] && [ "$MINOR" -lt 14 ]) ||
+       ([ "$MAJOR" -eq 0 ] && [ "$MINOR" -eq 14 ] && [ "$PATCH" -lt 8 ]); then
+      echo "Warning: Installed version $VERSION is below the required version 0.14.8"
+      echo "Upgrading to the required version..."
+      if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+        yarn add @tailwindcss/language-server@^0.14.8
+      else
+        npm install @tailwindcss/language-server@^0.14.8
+      fi
+
+      # Verify upgrade
+      NEW_VERSION=$(node_modules/.bin/tailwindcss-language-server --version 2>/dev/null || echo "unknown")
+      echo "Upgraded to version: $NEW_VERSION"
+    else
+      echo "Version requirement satisfied (>= 0.14.8)"
+    fi
+  else
+    echo "Warning: Could not determine version. Make sure you have version 0.14.8 or higher."
+  fi
+else
+  echo "Failed to install Tailwind CSS language server. Try installing it manually:"
+  echo "With yarn: yarn add @tailwindcss/language-server@^0.14.8 tailwindcss"
+  echo "With npm: npm install @tailwindcss/language-server@^0.14.8 tailwindcss"
+  exit 1
+fi
 
 echo "Setup complete!"

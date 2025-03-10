@@ -24,7 +24,8 @@ Gem::Specification.new do |spec|
     "bin/*",
     "README.md",
     "LICENSE.txt",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "package.json"  # Include package.json in the gem
   ]
   spec.bindir = "bin"
   spec.executables = ["tailwind_sorter", "tailwind_server"]
@@ -37,4 +38,22 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "bundler", "~> 2.0"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "rspec", "~> 3.12"
+
+  # Post-install message to inform users about JavaScript dependencies
+  spec.post_install_message = <<~MESSAGE
+    Thank you for installing tailwind_sorter!
+
+    This gem requires JavaScript dependencies from the Tailwind CSS ecosystem.
+    The gem will attempt to install these dependencies automatically when needed.
+
+    If you encounter any issues, you may need to install them manually:
+
+    yarn add @tailwindcss/language-server@^0.14.8 tailwindcss
+
+    or using npm:
+
+    npm install @tailwindcss/language-server@^0.14.8 tailwindcss
+
+    For more information, visit: #{spec.homepage}
+  MESSAGE
 end

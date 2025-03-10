@@ -444,7 +444,7 @@ module TailwindSorter
         end
 
         content_length = headers["Content-Length"].to_i
-        
+
         # Read exactly content_length bytes to avoid waiting indefinitely
         content = ""
         bytes_read = 0
@@ -458,9 +458,9 @@ module TailwindSorter
           content += chunk
           bytes_read += chunk.bytesize
         end
-        
+
         content.force_encoding('UTF-8')
-        
+
         begin
           return JSON.parse(content)
         rescue JSON::ParserError => e
@@ -520,16 +520,157 @@ module TailwindSorter
 
     def find_server_path
       paths = [
-        # Local node_modules path
+        # Local node_modules path (relative to the gem)
         File.join(File.expand_path('../../..', __FILE__), 'node_modules', '.bin', 'tailwindcss-language-server'),
+        # Project node_modules (if any)
+        @project_root ? File.join(@project_root, 'node_modules', '.bin', 'tailwindcss-language-server') : nil,
         # Global yarn/npm installation
-        `which tailwindcss-language-server`.strip
-      ]
+        `which tailwindcss-language-server 2>/dev/null`.strip,
+        # Try npx as a fallback
+        'npx tailwindcss-language-server'
+      ].compact
 
-      path = paths.find { |p| !p.empty? && File.exist?(p) && File.executable?(p) }
-      raise Error, "Tailwind CSS language server not found. Please install it with: bin/setup" unless path
+      # Check each path
+      path = paths.find do |p|
+        if p.start_with?('npx ')
+          # For npx, just check if npx is available
+          system('which npx > /dev/null 2>&1')
+        else
+          !p.empty? && File.exist?(p) && File.executable?(p)
+        end
+      end
+
+      # If no path found, try to auto-install dependencies
+      if !path
+        @logger.info("Tailwind CSS language server not found, attempting auto-installation...")
+        if auto_install_dependencies
+          # Re-check paths after installation
+          path = paths.find do |p|
+            next if p.start_with?('npx ') # Skip npx now that we've installed locally
+            !p.empty? && File.exist?(p) && File.executable?(p)
+          end
+        end
+      end
+
+      unless path
+        error_message = <<~ERROR
+          Tailwind CSS language server not found. You can install it with any of these methods:
+
+          # Option 1: Use the helper method in your code:
+          require 'tailwind_sorter'
+          TailwindSorter.setup_dependencies
+
+          # Option 2: Run the setup script directly:
+          cd #{File.expand_path('../../..', __FILE__)} && bin/setup
+
+          # Option 3: Install the npm packages manually:
+          yarn add @tailwindcss/language-server@^0.14.8 tailwindcss
+
+          # If using npm instead of yarn:
+          npm install @tailwindcss/language-server@^0.14.8 tailwindcss
+
+          IMPORTANT: You MUST use version 0.14.8 or higher of the language server.
+
+          You might need to restart your application after installation.
+        ERROR
+
+        @logger.error(error_message)
+        raise Error, error_message
+      end
+
+      # If using npx, just return the command
+      return path if path.start_with?('npx ')
+
+      # Check if the server is executable
+      unless File.executable?(path)
+        @logger.error("Found server at #{path} but it is not executable")
+        raise Error, "Found Tailwind CSS language server at #{path} but it is not executable. Try: chmod +x #{path}"
+      end
+
+      # Check if the server is the correct version
+      check_server_version(path)
 
       path
+    end
+
+    # Check if the server meets the minimum version requirement
+    def check_server_version(server_path)
+      begin
+        # Extract just the server command without any path or arguments
+        server_cmd = if server_path.start_with?('npx ')
+          'npx tailwindcss-language-server'
+        else
+          server_path
+        end
+
+        # Run the server with --version
+        version_output = `#{server_cmd} --version 2>&1`.strip
+        @logger.debug("Server version output: #{version_output}")
+
+        # Parse the version
+        if version_output =~ /(\d+)\.(\d+)\.(\d+)/
+          major = $1.to_i
+          minor = $2.to_i
+          patch = $3.to_i
+
+          # Check if version is less than 0.14.8
+          if major < 0 || (major == 0 && minor < 14) || (major == 0 && minor == 14 && patch < 8)
+            @logger.warn("Tailwind CSS language server version #{version_output} is less than required version 0.14.8")
+            @logger.warn("Some features may not work properly. Consider upgrading with: yarn add @tailwindcss/language-server@^0.14.8")
+          else
+            @logger.debug("Tailwind CSS language server version #{version_output} is OK")
+          end
+        else
+          @logger.warn("Could not determine Tailwind CSS language server version from: #{version_output}")
+        end
+      rescue => e
+        # Don't fail on version check error, just warn
+        @logger.warn("Failed to check Tailwind CSS language server version: #{e.message}")
+      end
+    end
+
+    # Attempt to automatically install dependencies
+    def auto_install_dependencies
+      gem_root = File.expand_path('../../..', __FILE__)
+      package_json_path = File.join(gem_root, 'package.json')
+
+      return false unless File.exist?(package_json_path)
+
+      @logger.info("Installing JavaScript dependencies...")
+
+      # Determine which package manager to use
+      package_manager = if system('which yarn > /dev/null 2>&1')
+        'yarn'
+      elsif system('which npm > /dev/null 2>&1')
+        'npm'
+      else
+        @logger.error("Neither yarn nor npm found.")
+        return false
+      end
+
+      # Run installation
+      Dir.chdir(gem_root) do
+        cmd = "#{package_manager} install"
+        @logger.info("Running: #{cmd}")
+        result = system(cmd)
+
+        unless result
+          @logger.error("Failed to install JavaScript dependencies.")
+          return false
+        end
+
+        # Make executable if needed
+        server_path = File.join(gem_root, 'node_modules', '.bin', 'tailwindcss-language-server')
+        if File.exist?(server_path) && !File.executable?(server_path)
+          File.chmod(0755, server_path)
+        end
+
+        @logger.info("Successfully installed JavaScript dependencies.")
+        return true
+      end
+    rescue => e
+      @logger.error("Error during dependency installation: #{e.message}")
+      return false
     end
 
     # only being called in one test right now.

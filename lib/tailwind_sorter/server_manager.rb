@@ -77,7 +77,7 @@ module TailwindSorter
       ]
 
       path = paths.find { |p| !p.empty? && File.executable?(p) }
-      raise Error, "Tailwind CSS language server not found. Please install it with: bin/setup" unless path
+      raise Error, "Tailwind CSS language server not found. Please install it with: rake install_js_deps" unless path
 
       path
     end

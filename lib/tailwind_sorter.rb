@@ -66,6 +66,31 @@ module TailwindSorter
     @use_direct_client
   end
 
+  # Run the setup script to install JavaScript dependencies
+  # @param verbose [Boolean] Whether to print verbose output
+  # @return [Boolean] Whether setup was successful
+  def self.setup_dependencies(verbose: true)
+    gem_root = File.expand_path('../..', __FILE__)
+    setup_script = File.join(gem_root, 'bin', 'setup')
+
+    if verbose
+      puts "Installing Tailwind CSS language server dependencies..."
+      success = system(setup_script)
+    else
+      # Run quietly
+      success = system("#{setup_script} > /dev/null 2>&1")
+    end
+
+    if success
+      puts "Dependencies installed successfully." if verbose
+      return true
+    else
+      error_msg = "Failed to install dependencies. Please try manually with: yarn add @tailwindcss/language-server tailwindcss"
+      puts error_msg if verbose
+      return false
+    end
+  end
+
   # Set auto-start to true by default
   self.auto_start = true
 end
