@@ -33,7 +33,7 @@ require 'tailwind_sorter'
 unsorted_classes = "flex items-center justify-between py-4 px-6 bg-white"
 sorted_classes = TailwindSorter.sort(unsorted_classes)
 puts sorted_classes
-# Output might be: "flex items-center justify-between bg-white px-6 py-4"
+# Output should be: "flex items-center justify-between bg-white px-6 py-4"
 ```
 
 ## Development
