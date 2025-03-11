@@ -439,7 +439,7 @@ module TailwindSorter
         end
 
         if !headers["Content-Length"]
-          @logger.error("No Content-Length header received from server")
+          @logger.debug("No Content-Length header received from server")
           raise Error, "Invalid response from language server: missing Content-Length header"
         end
 
@@ -452,7 +452,7 @@ module TailwindSorter
           chunk = Timeout.timeout(5) { @stdout.read(content_length - bytes_read) }
           if chunk.nil? || chunk.empty?
             # This indicates the server closed the connection or sent incomplete data
-            @logger.error("Server sent incomplete response (got #{bytes_read} of #{content_length} bytes)")
+            @logger.debug("Server sent incomplete response (got #{bytes_read} of #{content_length} bytes)")
             raise Error, "Server sent incomplete response. This might be caused by an issue with the Tailwind language server."
           end
           content += chunk
@@ -464,15 +464,15 @@ module TailwindSorter
         begin
           return JSON.parse(content)
         rescue JSON::ParserError => e
-          @logger.error("JSON parse error: #{e.message}")
-          @logger.error("Content received (#{content.bytesize} bytes): #{content.inspect}")
+          @logger.debug("JSON parse error: #{e.message}")
+          @logger.debug("Content received (#{content.bytesize} bytes): #{content.inspect}")
           raise Error, "Failed to parse server response: #{e.message}. Try restarting the Tailwind language server."
         end
       rescue Timeout::Error
-        @logger.error("Timeout while reading from server")
+        @logger.debug("Timeout while reading from server")
         raise Error, "Timeout while reading from Tailwind language server. The server might be busy or unresponsive."
       rescue IOError, Errno::EPIPE => e
-        @logger.error("IO error: #{e.message}")
+        @logger.debug("IO error: #{e.message}")
         raise Error, "Connection to Tailwind language server lost: #{e.message}. Try restarting the application."
       end
     end
@@ -542,7 +542,7 @@ module TailwindSorter
 
       # If no path found, try to auto-install dependencies
       if !path
-        @logger.info("Tailwind CSS language server not found, attempting auto-installation...")
+        @logger.debug("Tailwind CSS language server not found, attempting auto-installation...")
         if auto_install_dependencies
           # Re-check paths after installation
           path = paths.find do |p|
@@ -574,7 +574,7 @@ module TailwindSorter
           You might need to restart your application after installation.
         ERROR
 
-        @logger.error(error_message)
+        @logger.debug(error_message)
         raise Error, error_message
       end
 
@@ -583,7 +583,7 @@ module TailwindSorter
 
       # Check if the server is executable
       unless File.executable?(path)
-        @logger.error("Found server at #{path} but it is not executable")
+        @logger.debug("Found server at #{path} but it is not executable")
         raise Error, "Found Tailwind CSS language server at #{path} but it is not executable. Try: chmod +x #{path}"
       end
 
@@ -615,17 +615,17 @@ module TailwindSorter
 
           # Check if version is less than 0.14.8
           if major < 0 || (major == 0 && minor < 14) || (major == 0 && minor == 14 && patch < 8)
-            @logger.warn("Tailwind CSS language server version #{version_output} is less than required version 0.14.8")
-            @logger.warn("Some features may not work properly. Consider upgrading with: yarn add @tailwindcss/language-server@^0.14.8")
+            @logger.debug("Tailwind CSS language server version #{version_output} is less than required version 0.14.8")
+            @logger.debug("Some features may not work properly. Consider upgrading with: yarn add @tailwindcss/language-server@^0.14.8")
           else
             @logger.debug("Tailwind CSS language server version #{version_output} is OK")
           end
         else
-          @logger.warn("Could not determine Tailwind CSS language server version from: #{version_output}")
+          @logger.debug("Could not determine Tailwind CSS language server version from: #{version_output}")
         end
       rescue => e
         # Don't fail on version check error, just warn
-        @logger.warn("Failed to check Tailwind CSS language server version: #{e.message}")
+        @logger.debug("Failed to check Tailwind CSS language server version: #{e.message}")
       end
     end
 
@@ -636,7 +636,7 @@ module TailwindSorter
 
       return false unless File.exist?(package_json_path)
 
-      @logger.info("Installing JavaScript dependencies...")
+      @logger.debug("Installing JavaScript dependencies...")
 
       # Determine which package manager to use
       package_manager = if system('which yarn > /dev/null 2>&1')
@@ -644,18 +644,18 @@ module TailwindSorter
       elsif system('which npm > /dev/null 2>&1')
         'npm'
       else
-        @logger.error("Neither yarn nor npm found.")
+        @logger.debug("Neither yarn nor npm found.")
         return false
       end
 
       # Run installation
       Dir.chdir(gem_root) do
         cmd = "#{package_manager} install"
-        @logger.info("Running: #{cmd}")
+        @logger.debug("Running: #{cmd}")
         result = system(cmd)
 
         unless result
-          @logger.error("Failed to install JavaScript dependencies.")
+          @logger.debug("Failed to install JavaScript dependencies.")
           return false
         end
 
@@ -665,11 +665,11 @@ module TailwindSorter
           File.chmod(0755, server_path)
         end
 
-        @logger.info("Successfully installed JavaScript dependencies.")
+        @logger.debug("Successfully installed JavaScript dependencies.")
         return true
       end
     rescue => e
-      @logger.error("Error during dependency installation: #{e.message}")
+      @logger.debug("Error during dependency installation: #{e.message}")
       return false
     end
 
